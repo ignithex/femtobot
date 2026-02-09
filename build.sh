@@ -22,8 +22,28 @@ for target in "${TARGETS[@]}"; do
         rustup target add "${target}"
     fi
     
-    # Build for target
-    cargo build --release --target "${target}"
+    # Build for target with per-target linker configuration.
+    if [[ "${target}" == *"unknown-linux-gnu" ]]; then
+        linker="${target}-gcc"
+        ar_tool="${target}-ar"
+        if ! command -v "${linker}" >/dev/null 2>&1; then
+            echo "Missing linker for ${target}: ${linker}"
+            echo "Install cross toolchains (Homebrew):"
+            echo "  brew tap messense/macos-cross-toolchains"
+            echo "  brew install x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu"
+            exit 1
+        fi
+
+        target_env="${target//-/_}"
+        target_env_upper="$(printf '%s' "${target_env}" | tr '[:lower:]' '[:upper:]')"
+        env \
+            "CC_${target_env}=${linker}" \
+            "AR_${target_env}=${ar_tool}" \
+            "CARGO_TARGET_${target_env_upper}_LINKER=${linker}" \
+            cargo build --release --target "${target}"
+    else
+        cargo build --release --target "${target}"
+    fi
     
     # Determine output name
     case "${target}" in

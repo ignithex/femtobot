@@ -182,26 +182,12 @@ EOF
 }
 
 setup_service() {
-    if [[ "${OS_TYPE}" != "linux" ]]; then
-        return
-    fi
+    if [[ "${OS_TYPE}" == "linux" ]]; then
+        if ! command -v systemctl >/dev/null 2>&1; then
+            error "systemctl is required on Linux for background daemon mode"
+            exit 1
+        fi
 
-    if ! command -v systemctl >/dev/null 2>&1; then
-        return
-    fi
-
-    if [[ ! -t 0 ]]; then
-        warn "Non-interactive install detected; skipping optional systemd service setup."
-        return
-    fi
-
-    echo ""
-    if ! read -r -p "Enable femtobot as systemd service? [y/N]: " enable_service; then
-        warn "Unable to read service setup prompt; skipping systemd setup."
-        return
-    fi
-
-    if [[ "${enable_service}" =~ ^[Yy]$ ]]; then
         local service_dir="$HOME/.config/systemd/user"
         mkdir -p "${service_dir}"
 
@@ -213,26 +199,75 @@ After=network.target
 [Service]
 Type=simple
 ExecStart=${INSTALL_DIR}/${BINARY_NAME}
-Restart=on-failure
+WorkingDirectory=${HOME}
+Restart=always
+RestartSec=5
 
 [Install]
 WantedBy=default.target
 EOF
 
         if ! systemctl --user daemon-reload; then
-            warn "Failed to reload systemd user daemon. Service file was created but not enabled."
-            return
+            error "Failed to reload systemd user daemon"
+            exit 1
         fi
-        if ! systemctl --user enable femtobot; then
-            warn "Failed to enable femtobot service. You can enable it manually later."
-            return
-        fi
-        if ! systemctl --user start femtobot; then
-            warn "Failed to start femtobot service. You can start it manually later."
-            return
+        if ! systemctl --user enable --now femtobot; then
+            error "Failed to enable/start femtobot service"
+            error "If running over SSH, user services may need login session support."
+            exit 1
         fi
 
-        info "Service enabled and started!"
+        info "Daemon enabled and started with systemd user service"
+        return
+    fi
+
+    if [[ "${OS_TYPE}" == "darwin" ]]; then
+        local launch_dir="$HOME/Library/LaunchAgents"
+        local logs_dir="$HOME/.femtobot/logs"
+        local plist="${launch_dir}/io.femtobot.agent.plist"
+        local label="io.femtobot.agent"
+        local uid
+        uid="$(id -u)"
+
+        mkdir -p "${launch_dir}" "${logs_dir}"
+
+        cat > "${plist}" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>${label}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>${INSTALL_DIR}/${BINARY_NAME}</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>WorkingDirectory</key>
+  <string>${HOME}</string>
+  <key>StandardOutPath</key>
+  <string>${logs_dir}/femtobot.log</string>
+  <key>StandardErrorPath</key>
+  <string>${logs_dir}/femtobot.error.log</string>
+</dict>
+</plist>
+EOF
+
+        launchctl bootout "gui/${uid}" "${plist}" >/dev/null 2>&1 || true
+        if ! launchctl bootstrap "gui/${uid}" "${plist}"; then
+            error "Failed to bootstrap launchd agent"
+            exit 1
+        fi
+        if ! launchctl kickstart -k "gui/${uid}/${label}"; then
+            error "Failed to start launchd agent"
+            exit 1
+        fi
+
+        info "Daemon enabled and started with launchd agent"
+        return
     fi
 }
 
@@ -309,9 +344,12 @@ main() {
     echo "Binary: ${INSTALL_DIR}/${BINARY_NAME}"
     echo "Config: $HOME/.femtobot/config.json"
     echo ""
-    if [[ -f "$HOME/.config/systemd/user/femtobot.service" ]]; then
+    if [[ "${OS_TYPE}" == "linux" ]] && [[ -f "$HOME/.config/systemd/user/femtobot.service" ]]; then
         echo "Service status: systemctl --user status femtobot"
         echo "Service logs:  journalctl --user -u femtobot -f"
+    elif [[ "${OS_TYPE}" == "darwin" ]] && [[ -f "$HOME/Library/LaunchAgents/io.femtobot.agent.plist" ]]; then
+        echo "Service status: launchctl print gui/$(id -u)/io.femtobot.agent"
+        echo "Service logs:  tail -f $HOME/.femtobot/logs/femtobot.log"
     else
         echo "Run: ${BINARY_NAME}"
     fi
