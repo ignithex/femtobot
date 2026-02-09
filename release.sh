@@ -47,6 +47,54 @@ sha256_file() {
 echo ""
 echo "Uploading binaries to GitHub..."
 
+api_get() {
+    local url="$1"
+    curl -sf \
+        -H "Authorization: token ${GITHUB_TOKEN}" \
+        -H "Accept: application/vnd.github.v3+json" \
+        "${url}"
+}
+
+api_post_json() {
+    local url="$1"
+    local data="$2"
+    curl -sf -X POST \
+        -H "Authorization: token ${GITHUB_TOKEN}" \
+        -H "Accept: application/vnd.github.v3+json" \
+        "${url}" \
+        -d "${data}"
+}
+
+json_release_upload_url() {
+    local json="$1"
+    if command -v jq >/dev/null 2>&1; then
+        echo "${json}" | jq -r '.upload_url // empty' | sed 's/{?name,label}//'
+    else
+        echo "${json}" | tr -d '\n' | sed -n 's/.*"upload_url":"\([^"]*\)".*/\1/p' | sed 's/{?name,label}//'
+    fi
+}
+
+json_release_id() {
+    local json="$1"
+    if command -v jq >/dev/null 2>&1; then
+        echo "${json}" | jq -r '.id // empty'
+    else
+        echo "${json}" | tr -d '\n' | sed -n 's/.*"id":[[:space:]]*\([0-9][0-9]*\).*/\1/p'
+    fi
+}
+
+json_asset_id_by_name() {
+    local json="$1"
+    local name="$2"
+    if command -v jq >/dev/null 2>&1; then
+        echo "${json}" | jq -r --arg n "${name}" '.[] | select(.name == $n) | .id' | head -n1
+    else
+        echo "${json}" | tr -d '\n' \
+            | sed -n "s/.*{\"url\":\"[^\"]*\",\"id\":\([0-9][0-9]*\),\"node_id\":\"[^\"]*\",\"name\":\"${name}\".*/\1/p" \
+            | head -n1
+    fi
+}
+
 ASSETS=(
     "femtobot-linux-x86_64"
     "femtobot-linux-aarch64"
@@ -79,26 +127,36 @@ RELEASE_DATA=$(cat <<EOF
 EOF
 )
 
-RELEASE_RESPONSE=$(curl -s -X POST \
-    -H "Authorization: token ${GITHUB_TOKEN}" \
-    -H "Accept: application/vnd.github.v3+json" \
-    "https://api.github.com/repos/${REPO}/releases" \
-    -d "${RELEASE_DATA}")
+RELEASE_RESPONSE=$(api_get "https://api.github.com/repos/${REPO}/releases/tags/v${VERSION}" || true)
+if [[ -z "${RELEASE_RESPONSE}" ]]; then
+    RELEASE_RESPONSE=$(api_post_json "https://api.github.com/repos/${REPO}/releases" "${RELEASE_DATA}")
+fi
 
-UPLOAD_URL=$(echo "${RELEASE_RESPONSE}" | grep -m1 '"upload_url"' | sed 's/.*"upload_url":"\([^"]*\)".*/\1/' | sed 's/{?name,label}//')
+UPLOAD_URL="$(json_release_upload_url "${RELEASE_RESPONSE}")"
+RELEASE_ID="$(json_release_id "${RELEASE_RESPONSE}")"
 
-if [[ -z "${UPLOAD_URL}" ]]; then
-    echo "Error: Failed to create release"
+if [[ -z "${UPLOAD_URL}" ]] || [[ -z "${RELEASE_ID}" ]]; then
+    echo "Error: Failed to load or create release"
     echo "${RELEASE_RESPONSE}"
     exit 1
 fi
 
 for asset in "${UPLOAD_ASSETS[@]}"; do
     if [[ -f "${asset}" ]]; then
+        release_assets_json="$(api_get "https://api.github.com/repos/${REPO}/releases/${RELEASE_ID}/assets")"
+        existing_asset_id="$(json_asset_id_by_name "${release_assets_json}" "${asset}")"
+        if [[ -n "${existing_asset_id}" ]]; then
+            echo "Removing existing ${asset}..."
+            curl -sf -X DELETE \
+                -H "Authorization: token ${GITHUB_TOKEN}" \
+                -H "Accept: application/vnd.github.v3+json" \
+                "https://api.github.com/repos/${REPO}/releases/assets/${existing_asset_id}" > /dev/null
+        fi
+
         echo "Uploading ${asset}..."
         asset_size=$(wc -c < "${asset}")
 
-        curl -s -X POST \
+        curl -sf -X POST \
             -H "Authorization: token ${GITHUB_TOKEN}" \
             -H "Accept: application/vnd.github.v3+json" \
             -H "Content-Type: application/octet-stream" \

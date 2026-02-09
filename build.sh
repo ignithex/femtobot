@@ -27,17 +27,24 @@ for target in "${TARGETS[@]}"; do
     
     # Determine output name
     case "${target}" in
-        *-linux-*)
+        *-unknown-linux-gnu)
             output_name="${PROJECT_NAME}-linux-${target%%-*}"
             ;;
-        *-darwin-*)
+        *-apple-darwin)
             output_name="${PROJECT_NAME}-darwin-${target%%-*}"
+            ;;
+        *)
+            echo "Unsupported target naming: ${target}"
+            exit 1
             ;;
     esac
     
     # Strip binary
     if [[ "${target}" == *"linux"* ]]; then
-        strip "target/${target}/release/${PROJECT_NAME}" || true
+        strip_tool="${target}-strip"
+        if command -v "${strip_tool}" >/dev/null 2>&1; then
+            "${strip_tool}" "target/${target}/release/${PROJECT_NAME}" || true
+        fi
     fi
     
     # Copy to root directory with platform name
