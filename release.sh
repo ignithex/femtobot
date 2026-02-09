@@ -23,6 +23,23 @@ echo "Creating release v${VERSION} for ${REPO}..."
 ./build.sh "${VERSION}"
 
 echo ""
+echo "Generating SHA-256 checksums..."
+
+sha256_file() {
+    local input_file="$1"
+    local output_file="${input_file}.sha256"
+
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "${input_file}" > "${output_file}"
+    elif command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 "${input_file}" > "${output_file}"
+    else
+        echo "Error: neither sha256sum nor shasum is installed"
+        exit 1
+    fi
+}
+
+echo ""
 echo "Uploading binaries to GitHub..."
 
 ASSETS=(
@@ -31,6 +48,20 @@ ASSETS=(
     "femtobot-darwin-x86_64"
     "femtobot-darwin-aarch64"
 )
+
+for asset in "${ASSETS[@]}"; do
+    if [[ -f "${asset}" ]]; then
+        sha256_file "${asset}"
+    fi
+done
+
+UPLOAD_ASSETS=("${ASSETS[@]}")
+for asset in "${ASSETS[@]}"; do
+    checksum_asset="${asset}.sha256"
+    if [[ -f "${checksum_asset}" ]]; then
+        UPLOAD_ASSETS+=("${checksum_asset}")
+    fi
+done
 
 RELEASE_DATA=$(cat <<EOF
 {
@@ -57,7 +88,7 @@ if [[ -z "${UPLOAD_URL}" ]]; then
     exit 1
 fi
 
-for asset in "${ASSETS[@]}"; do
+for asset in "${UPLOAD_ASSETS[@]}"; do
     if [[ -f "${asset}" ]]; then
         echo "Uploading ${asset}..."
         asset_size=$(wc -c < "${asset}")
