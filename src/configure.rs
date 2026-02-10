@@ -17,7 +17,7 @@ pub fn run() -> Result<()> {
 
     loop {
         println!("Menu:");
-        println!("1. Configure provider (OpenRouter/OpenAI)");
+        println!("1. Configure provider (OpenRouter/OpenAI/Ollama)");
         println!("2. Configure Telegram");
         println!("3. Configure model");
         println!("4. Configure web search (Brave)");
@@ -86,9 +86,9 @@ fn configure_provider(root: &mut Value) -> Result<bool> {
     let current_provider =
         get_str_at(root, &["agents", "defaults", "provider"]).unwrap_or("openrouter");
     let provider = prompt_enum_with_current(
-        "Active provider (openrouter/openai)",
+        "Active provider (openrouter/openai/ollama)",
         current_provider,
-        &["openrouter", "openai"],
+        &["openrouter", "openai", "ollama"],
     )?;
     let normalized = provider;
 
@@ -127,6 +127,19 @@ fn configure_provider(root: &mut Value) -> Result<bool> {
             set_path(
                 root,
                 &["providers", "openai", "apiBase"],
+                Value::String(base),
+            )?;
+        }
+        "ollama" => {
+            let current_key = get_str_at(root, &["providers", "ollama", "apiKey"]).unwrap_or("");
+            let current_base = get_str_at(root, &["providers", "ollama", "apiBase"])
+                .unwrap_or("http://127.0.0.1:11434/v1");
+            let key = prompt_secret("Ollama API key (optional)", current_key)?;
+            let base = prompt_with_current("Ollama base URL", current_base)?;
+            set_path(root, &["providers", "ollama", "apiKey"], Value::String(key))?;
+            set_path(
+                root,
+                &["providers", "ollama", "apiBase"],
                 Value::String(base),
             )?;
         }

@@ -40,6 +40,7 @@ const PER_ROUTE_MAX_RETRIES: usize = 2;
 enum RuntimeAgent {
     OpenRouter(Agent<openrouter::CompletionModel>),
     OpenAI(Agent<openai::responses_api::ResponsesCompletionModel>),
+    Ollama(Agent<openai::responses_api::ResponsesCompletionModel>),
 }
 
 impl RuntimeAgent {
@@ -58,6 +59,13 @@ impl RuntimeAgent {
                     .await
             }
             Self::OpenAI(agent) => {
+                agent
+                    .prompt(prompt)
+                    .with_history(history)
+                    .max_turns(max_turns)
+                    .await
+            }
+            Self::Ollama(agent) => {
                 agent
                     .prompt(prompt)
                     .with_history(history)
@@ -475,6 +483,31 @@ fn build_runtime_agent_for_route(
                 builder = builder.dynamic_context(DYNAMIC_CONTEXT_SAMPLES, vm.clone());
             }
             Some(RuntimeAgent::OpenAI(builder.build()))
+        }
+        ProviderKind::Ollama => {
+            let client = build_openai_client(
+                &cfg.ollama_api_key,
+                &cfg.ollama_base_url,
+                &cfg.ollama_extra_headers,
+            );
+            let mut builder = client
+                .agent(&route.model)
+                .preamble(preamble)
+                .tool(tools.read_file.clone())
+                .tool(tools.write_file.clone())
+                .tool(tools.edit_file.clone())
+                .tool(tools.list_dir.clone())
+                .tool(tools.exec.clone())
+                .tool(tools.web_search.clone())
+                .tool(tools.web_fetch.clone())
+                .tool(tools.cron.clone())
+                .tool(tools.send_message.clone())
+                .max_tokens(4096)
+                .additional_params(json!({ "max_tokens": 4096 }));
+            if let Some(vm) = vector_memory {
+                builder = builder.dynamic_context(DYNAMIC_CONTEXT_SAMPLES, vm.clone());
+            }
+            Some(RuntimeAgent::Ollama(builder.build()))
         }
     }
 }

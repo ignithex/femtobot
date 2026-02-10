@@ -71,7 +71,55 @@ impl OpenRouterClient {
                 None,
                 cfg.openai_extra_headers.clone(),
             ),
+            ProviderKind::Ollama => Self::new_optional_key(
+                cfg.ollama_api_key.clone(),
+                cfg.ollama_base_url.clone(),
+                None,
+                None,
+                cfg.ollama_extra_headers.clone(),
+            ),
         }
+    }
+
+    fn new_optional_key(
+        api_key: String,
+        base_url: String,
+        http_referer: Option<String>,
+        app_title: Option<String>,
+        extra_headers: Vec<(String, String)>,
+    ) -> Result<Self> {
+        let mut headers = HeaderMap::new();
+        headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+        if !api_key.trim().is_empty() {
+            headers.insert(
+                AUTHORIZATION,
+                HeaderValue::from_str(&format!("Bearer {api_key}"))?,
+            );
+        }
+        if let Some(referer) = http_referer {
+            if !referer.trim().is_empty() {
+                headers.insert("HTTP-Referer", HeaderValue::from_str(&referer)?);
+            }
+        }
+        if let Some(title) = app_title {
+            if !title.trim().is_empty() {
+                headers.insert("X-Title", HeaderValue::from_str(&title)?);
+            }
+        }
+        for (key, value) in extra_headers {
+            if let (Ok(name), Ok(val)) = (
+                reqwest::header::HeaderName::from_bytes(key.as_bytes()),
+                HeaderValue::from_str(&value),
+            ) {
+                headers.insert(name, val);
+            }
+        }
+
+        Ok(Self {
+            http: reqwest::Client::new(),
+            base_url,
+            headers,
+        })
     }
 
     fn url(&self, path: &str) -> String {

@@ -27,7 +27,29 @@ pub struct WebSearchArgs {
     /// Search query
     pub query: String,
     /// Number of results (1-10)
+    #[serde(default, deserialize_with = "de_optional_u8")]
     pub count: Option<u8>,
+}
+
+fn de_optional_u8<'de, D>(deserializer: D) -> Result<Option<u8>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let raw = Option::<serde_json::Value>::deserialize(deserializer)?;
+    match raw {
+        None => Ok(None),
+        Some(serde_json::Value::Number(n)) => n
+            .as_u64()
+            .and_then(|v| u8::try_from(v).ok())
+            .map(Some)
+            .ok_or_else(|| D::Error::custom("count must be an integer between 0 and 255")),
+        Some(serde_json::Value::String(s)) => s
+            .trim()
+            .parse::<u8>()
+            .map(Some)
+            .map_err(|_| D::Error::custom("count string must be an integer between 0 and 255")),
+        Some(_) => Err(D::Error::custom("count must be an integer or integer string")),
+    }
 }
 
 impl Tool for WebSearchTool {
@@ -95,6 +117,25 @@ impl Tool for WebSearchTool {
             }
             Ok(lines.join("\n"))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::WebSearchArgs;
+
+    #[test]
+    fn web_search_args_accept_numeric_count() {
+        let args: WebSearchArgs =
+            serde_json::from_value(serde_json::json!({"query": "hn", "count": 10})).unwrap();
+        assert_eq!(args.count, Some(10));
+    }
+
+    #[test]
+    fn web_search_args_accept_string_count() {
+        let args: WebSearchArgs =
+            serde_json::from_value(serde_json::json!({"query": "hn", "count": "10"})).unwrap();
+        assert_eq!(args.count, Some(10));
     }
 }
 

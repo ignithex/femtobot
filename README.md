@@ -64,7 +64,8 @@ Create `~/.femtobot/config.json`:
       "provider": "openrouter",
       "model": "anthropic/claude-opus-4-5",
       "model_fallbacks": [
-        "openai/gpt-4o-mini"
+        "openai/gpt-4o-mini",
+        "ollama/llama3.2"
       ]
     }
   },
@@ -74,6 +75,9 @@ Create `~/.femtobot/config.json`:
     },
     "openai": {
       "apiKey": "sk-..."
+    },
+    "ollama": {
+      "apiBase": "http://127.0.0.1:11434/v1"
     },
     "mistral": {
       "apiKey": "..."

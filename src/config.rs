@@ -9,6 +9,7 @@ use std::path::PathBuf;
 pub enum ProviderKind {
     OpenRouter,
     OpenAI,
+    Ollama,
 }
 
 impl ProviderKind {
@@ -16,6 +17,7 @@ impl ProviderKind {
         match raw.trim().to_ascii_lowercase().as_str() {
             "openrouter" => Some(Self::OpenRouter),
             "openai" => Some(Self::OpenAI),
+            "ollama" => Some(Self::Ollama),
             _ => None,
         }
     }
@@ -24,6 +26,7 @@ impl ProviderKind {
         match self {
             Self::OpenRouter => "openrouter",
             Self::OpenAI => "openai",
+            Self::Ollama => "ollama",
         }
     }
 }
@@ -41,6 +44,9 @@ pub struct AppConfig {
     pub openai_api_key: String,
     pub openai_base_url: String,
     pub openai_extra_headers: Vec<(String, String)>,
+    pub ollama_api_key: String,
+    pub ollama_base_url: String,
+    pub ollama_extra_headers: Vec<(String, String)>,
     pub mistral_api_key: String,
     pub mistral_base_url: String,
 
@@ -80,7 +86,7 @@ impl AppConfig {
 
         apply_env_overrides(&mut cfg);
 
-        if cfg.provider_api_key().trim().is_empty() {
+        if cfg.provider_requires_api_key() && cfg.provider_api_key().trim().is_empty() {
             return Err(anyhow!(
                 "missing API key for provider '{}' (set env var or providers.{}.apiKey in ~/.femtobot/config.json)",
                 cfg.provider.as_str(),
@@ -108,6 +114,9 @@ impl AppConfig {
             openai_api_key: String::new(),
             openai_base_url: "https://api.openai.com/v1".to_string(),
             openai_extra_headers: Vec::new(),
+            ollama_api_key: String::new(),
+            ollama_base_url: "http://127.0.0.1:11434/v1".to_string(),
+            ollama_extra_headers: Vec::new(),
             mistral_api_key: String::new(),
             mistral_base_url: "https://api.mistral.ai/v1".to_string(),
 
@@ -142,6 +151,14 @@ impl AppConfig {
         match self.provider {
             ProviderKind::OpenRouter => &self.openrouter_api_key,
             ProviderKind::OpenAI => &self.openai_api_key,
+            ProviderKind::Ollama => &self.ollama_api_key,
+        }
+    }
+
+    pub fn provider_requires_api_key(&self) -> bool {
+        match self.provider {
+            ProviderKind::OpenRouter | ProviderKind::OpenAI => true,
+            ProviderKind::Ollama => false,
         }
     }
 
@@ -220,6 +237,7 @@ fn apply_femtobot_config(cfg: &mut AppConfig, value: &Value) {
 
     apply_provider_config(cfg, value, &["openrouter"], ProviderKind::OpenRouter);
     apply_provider_config(cfg, value, &["openai"], ProviderKind::OpenAI);
+    apply_provider_config(cfg, value, &["ollama"], ProviderKind::Ollama);
     if let Some(obj) = get_provider_object(value, &["mistral"]) {
         if let Some(v) = obj
             .get("apiKey")
@@ -390,6 +408,17 @@ fn apply_provider_config(
                 cfg.openai_extra_headers = v;
             }
         }
+        ProviderKind::Ollama => {
+            if let Some(v) = api_key {
+                cfg.ollama_api_key = v.to_string();
+            }
+            if let Some(v) = base_url {
+                cfg.ollama_base_url = v.to_string();
+            }
+            if let Some(v) = extra_headers {
+                cfg.ollama_extra_headers = v;
+            }
+        }
     }
 }
 
@@ -443,6 +472,12 @@ fn apply_env_overrides(cfg: &mut AppConfig) {
     }
     if let Ok(base) = std::env::var("OPENAI_BASE_URL") {
         cfg.openai_base_url = base;
+    }
+    if let Ok(key) = std::env::var("OLLAMA_API_KEY") {
+        cfg.ollama_api_key = key;
+    }
+    if let Ok(base) = std::env::var("OLLAMA_BASE_URL") {
+        cfg.ollama_base_url = base;
     }
     if let Ok(key) = std::env::var("MISTRAL_API_KEY") {
         cfg.mistral_api_key = key;
